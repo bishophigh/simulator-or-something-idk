@@ -8,8 +8,8 @@ let lastSpawnTime = 0;
 let spawnActive = true; 
 
 const gravity = 0.2;
-const floorY = 400;
-const names = ["goobert", "hubert", "bob"]; 
+let floorY; // Dynamic floor based on height
+const names = ["goobert", "hubert", "bob", "zaza", "glib"]; 
 const lifeSpan = 20000; 
 const jumpInterval = 3000; 
 
@@ -20,10 +20,14 @@ let isNight = false;
 let spawnBtn, clearBtn, spikeBtn;
 
 function setup() {
-  let canvas = createCanvas(400, 400);
+  // Make canvas full screen
+  let canvas = createCanvas(windowWidth, windowHeight);
+  floorY = height - 50; 
+  
   rectMode(CENTER);
   canvas.elt.oncontextmenu = () => false;
   
+  // Initialize Buttons
   spawnBtn = createButton('Spawning: ON');
   spawnBtn.position(10, 50);
   spawnBtn.size(100, 30);
@@ -34,15 +38,21 @@ function setup() {
   clearBtn.size(80, 30);
   clearBtn.mousePressed(clearAllCubes);
 
-  spikeBtn = createButton('Generate Spikes');
+  spikeBtn = createButton('Spikes');
   spikeBtn.position(210, 50);
-  spikeBtn.size(110, 30);
+  spikeBtn.size(80, 30);
   spikeBtn.mousePressed(generateSpikes);
 
   updateButtonStyles();
 
   let savedScore = localStorage.getItem("cubeHighScore");
   if (savedScore !== null) highScore = parseInt(savedScore);
+}
+
+// Ensure the game resizes when the window or phone orientation changes
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  floorY = height - 50;
 }
 
 function generateSpikes() {
@@ -83,10 +93,18 @@ function createExplosion(s, pColor) {
 function updateButtonStyles() {
   spawnBtn.style('background-color', spawnActive ? '#4CAF50' : '#f44336');
   spawnBtn.style('color', 'white');
+  spawnBtn.style('border', 'none');
+  spawnBtn.style('border-radius', '5px');
+  
   clearBtn.style('background-color', '#555555');
   clearBtn.style('color', 'white');
+  clearBtn.style('border', 'none');
+  clearBtn.style('border-radius', '5px');
+
   spikeBtn.style('background-color', '#8B0000');
   spikeBtn.style('color', 'white');
+  spikeBtn.style('border', 'none');
+  spikeBtn.style('border-radius', '5px');
 }
 
 function say(cube, message) {
@@ -106,30 +124,40 @@ function draw() {
   
   isNight = bgLerp < 0.3;
 
+  // Celestial Body (Sun/Moon)
   if (bgLerp <= 0.5) {
     push();
-    translate(width/2, height/2 + 100);
-    let celestialX = cos(angle) * 200;
-    let celestialY = sin(angle) * 200;
+    translate(width/2, height/2 + 200);
+    let celestialX = cos(angle) * (width * 0.4);
+    let celestialY = sin(angle) * (height * 0.4);
     fill(220); stroke(180); strokeWeight(2);
     ellipse(-celestialX, -celestialY, 30, 30);
     pop();
   }
 
+  // UI Text
   fill(isNight ? 255 : 0); noStroke(); textAlign(LEFT, TOP);
+  textSize(16);
   text("Score: " + score, 10, 10);
   text("High: " + highScore, 10, 28);
   text(isNight ? "Night Time (Zzz...)" : "Day Time", 10, 85);
 
+  // Draw Floor
+  stroke(isNight ? 100 : 50);
+  strokeWeight(2);
+  line(0, floorY, width, floorY);
+
+  // Spikes
   for (let s of spikes) {
     fill(100); stroke(0); strokeWeight(2);
     if (s.side === 'left') triangle(0, s.y - 15, 20, s.y, 0, s.y + 15);
     else triangle(width, s.y - 15, width - 20, s.y, width, s.y + 15);
   }
 
+  // Spawning logic
   if (spawnActive && now - lastSpawnTime >= 2500) {
     let newCube = {
-      x: random(100, width - 100), y: 100, size: 50,
+      x: random(50, width - 50), y: -50, size: 50,
       velocityX: random(-4, 4), velocityY: 0,
       onFloor: false, name: random(names),
       spawnTime: now, faceType: floor(random(3)),
@@ -141,7 +169,62 @@ function draw() {
     lastSpawnTime = now;
   }
 
-  // Particle/Ripple update
+  // Particles & Ripples
+  updateVisualEffects();
+
+  for (let i = cubes.length - 1; i >= 0; i--) {
+    let s = cubes[i];
+    if (s.isImmortal) s.spawnTime = now - (now % 1000); 
+
+    let timeLeft = lifeSpan - (now - s.spawnTime);
+    if (timeLeft <= 0) { removeCube(i, color(100)); continue; }
+
+    // Movement Physics
+    if (s.dragging) {
+      s.x = mouseX; s.y = mouseY;
+      s.velocityX = (mouseX - pmouseX) * 0.5; s.velocityY = (mouseY - pmouseY) * 0.5;
+      s.onFloor = false;
+      if (frameCount % 40 === 0) say(s, random(["Eek!", "Whoa!", "High!"]));
+    } else {
+      s.velocityY += gravity; s.x += s.velocityX; s.y += s.velocityY;
+      if (now - s.lastJumpTime >= jumpInterval && s.onFloor && (!isNight || s.isImmortal)) {
+        s.velocityY = random(-7, -10); s.velocityX = random(-4, 4); s.onFloor = false;
+        s.lastJumpTime = now;
+      }
+      if (isNight && !s.isImmortal && s.onFloor && s.speech === "" && random() < 0.005) {
+        say(s, "Zzz...");
+      }
+    }
+
+    // Floor Collision
+    if (s.y + s.size/2 >= floorY) { 
+      s.y = floorY - s.size/2; 
+      s.velocityY = 0; 
+      s.onFloor = true; 
+      s.velocityX *= 0.9; 
+    }
+    
+    // Wall & Spike Collision
+    if (s.x < s.size/2 || s.x > width - s.size/2) {
+      for (let spike of spikes) {
+        if (abs(s.y - spike.y) < s.size/2 + 10) {
+           if (!s.isImmortal && ((spike.side === 'left' && s.x < 35) || (spike.side === 'right' && s.x > width - 35))) {
+            removeCube(i, color(200, 0, 0)); break;
+          }
+        }
+      }
+      if (cubes[i]) { 
+        s.velocityX *= -0.8; 
+        s.x = constrain(s.x, s.size/2, width - s.size/2); 
+      }
+      if (!cubes[i]) continue;
+    }
+
+    drawCube(s, now, timeLeft);
+  }
+}
+
+function updateVisualEffects() {
   for (let i = particles.length - 1; i >= 0; i--) {
     let p = particles[i]; p.x += p.vx; p.y += p.vy; p.vy += gravity; p.alpha -= 5;
     noStroke(); fill(red(p.c), green(p.c), blue(p.c), p.alpha);
@@ -154,48 +237,9 @@ function draw() {
     strokeWeight(3); ellipse(r.x, r.y, r.r);
     if (r.alpha <= 0) ripples.splice(i, 1);
   }
+}
 
-  for (let i = cubes.length - 1; i >= 0; i--) {
-    let s = cubes[i];
-    if (s.isImmortal) s.spawnTime = now - (now % 1000); 
-
-    let timeLeft = lifeSpan - (now - s.spawnTime);
-    if (timeLeft <= 0) { removeCube(i, color(100)); continue; }
-
-    if (s.dragging) {
-      s.x = mouseX; s.y = mouseY;
-      s.velocityX = (mouseX - pmouseX) * 0.5; s.velocityY = (mouseY - pmouseY) * 0.5;
-      s.onFloor = false;
-      if (frameCount % 40 === 0) say(s, random(["Eek!", "Whoa!", "High!"]));
-    } else {
-      s.velocityY += gravity; s.x += s.velocityX; s.y += s.velocityY;
-      
-      // Auto-jump logic (No vocabulary used)
-      if (now - s.lastJumpTime >= jumpInterval && s.onFloor && (!isNight || s.isImmortal)) {
-        s.velocityY = random(-7, -10); s.velocityX = random(-4, 4); s.onFloor = false;
-        s.lastJumpTime = now;
-      }
-      
-      // Night Snoring
-      if (isNight && !s.isImmortal && s.onFloor && s.speech === "" && random() < 0.005) {
-        say(s, "Zzz...");
-      }
-    }
-
-    if (s.y + s.size/2 >= floorY) { s.y = floorY - s.size/2; s.velocityY = 0; s.onFloor = true; s.velocityX *= 0.9; }
-    
-    if (s.x < s.size/2 || s.x > width - s.size/2) {
-      for (let spike of spikes) {
-        if (abs(s.y - spike.y) < s.size/2 + 10) {
-           if (!s.isImmortal && ((spike.side === 'left' && s.x < 35) || (spike.side === 'right' && s.x > width - 35))) {
-            removeCube(i, color(200, 0, 0)); break;
-          }
-        }
-      }
-      if (cubes[i]) { s.velocityX *= -0.8; s.x = constrain(s.x, s.size/2, width - s.size/2); }
-      if (!cubes[i]) continue;
-    }
-
+function drawCube(s, now, timeLeft) {
     let alphaVal = timeLeft < 2000 ? map(timeLeft, 0, 2000, 0, 255) : 255;
     push();
     translate(s.x, s.y);
@@ -206,30 +250,36 @@ function draw() {
     let squish = s.onFloor ? 0 : map(abs(s.velocityY), 0, 15, 0, 12);
     rect(0, 0, s.size + squish, s.size - squish, 5);
     
+    // Life Bar
     if (!s.isImmortal) {
       let progress = constrain(timeLeft / lifeSpan, 0, 1);
-      noStroke(); fill(lerp(255, 76, progress), lerp(0, 175, progress), lerp(0, 80, progress), alphaVal);
+      noStroke(); fill(lerp(255, 76, 1-progress), lerp(0, 175, progress), lerp(0, 80, progress), alphaVal);
       rectMode(CORNER); rect(-s.size/2 + 5, s.size/2 - 8, map(timeLeft, 0, lifeSpan, 0, s.size - 10), 4); rectMode(CENTER);
     }
     
     fill(isNight ? 200 : 0, alphaVal); noStroke(); textAlign(CENTER);
     text(s.name, 0, -s.size / 2 - 5);
 
-    // SPEECH BUBBLE
-    if (s.speech && now - s.speechTime < 1500 && (!isNight || s.isImmortal || s.speech === "Zzz...")) {
+    // Speech Bubble
+    if (s.speech && now - s.speechTime < 1500) {
         let tw = textWidth(s.speech);
         let bw = tw + 20; let bh = 25; let bx = 0; let by = -s.size - 20;
         push();
         fill(255, alphaVal); stroke(0, alphaVal); strokeWeight(1);
         rect(bx, by, bw, bh, 8);
-        beginShape(); vertex(-5, by + bh/2); vertex(5, by + bh/2); vertex(0, by + bh/2 + 8); endShape(CLOSE);
         fill(0, alphaVal); noStroke(); textAlign(CENTER, CENTER);
         text(s.speech, bx, by);
         pop();
     }
 
+    // Faces
+    drawFace(s, alphaVal);
+    pop();
+}
+
+function drawFace(s, alphaVal) {
     if (isNight && !s.isImmortal) {
-      stroke(isNight ? 200 : 0, alphaVal); line(-10, -5, -2, -5); line(2, -5, 10, -5);
+      stroke(200, alphaVal); line(-10, -5, -2, -5); line(2, -5, 10, -5);
     } else {
       let isFlying = s.dragging || (abs(s.velocityX) > 3.5 && !s.onFloor);
       stroke(isNight ? 255 : 0, alphaVal);
@@ -241,8 +291,6 @@ function draw() {
         else if (s.faceType === 2) { ellipse(-10, -8, 6, 8); ellipse(12, -3, 4, 4); ellipse(0, 10, 10, 10); }
       }
     }
-    pop();
-  }
 }
 
 function removeCube(index, pColor) {
